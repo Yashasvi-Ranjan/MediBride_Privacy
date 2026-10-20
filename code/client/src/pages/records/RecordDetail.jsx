@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { recordService } from '../../services/recordService';
-import { ArrowLeft, FileText, Download, Calendar, User, Building, Trash2, Printer } from 'lucide-react';
+import { ArrowLeft, FileText, Download, Calendar, User, Building, Trash2, Printer, Shield, ShieldAlert, ShieldCheck, Eye, EyeOff, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const RecordDetail = () => {
@@ -83,6 +83,16 @@ Authenticated via MediBridge Health ID Security Token
       navigate('/records');
     } catch (err) {
       toast.error('Failed to delete record');
+    }
+  };
+
+  const handleUpdatePrivacy = async (updates) => {
+    try {
+      const res = await recordService.updateRecordPrivacy(id, updates);
+      setRecord(res.data.data);
+      toast.success('Privacy settings updated');
+    } catch (err) {
+      toast.error('Failed to update privacy settings');
     }
   };
 
@@ -232,6 +242,68 @@ Authenticated via MediBridge Health ID Security Token
             <p className="text-slate-700 text-sm whitespace-pre-wrap">{record.clinicalNotes}</p>
           </div>
         )}
+
+        {/* Granular Privacy & Sovereignty Controls */}
+        <div className="p-6 border-t border-slate-100 bg-slate-50/70">
+          <div className="flex items-center gap-2 mb-4">
+            <Lock className="w-5 h-5 text-blue-600" />
+            <h2 className="text-sm font-bold text-slate-900">Privacy & Doctor Access Controls</h2>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Sensitivity Selection */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
+              <p className="text-xs font-semibold text-slate-700">Sensitivity Classification</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'standard', label: 'Standard', color: 'bg-slate-100 text-slate-700 hover:bg-slate-200' },
+                  { id: 'sensitive', label: 'Sensitive', color: 'bg-amber-100 text-amber-800 hover:bg-amber-200' },
+                  { id: 'strictly_confidential', label: 'Confidential', color: 'bg-rose-100 text-rose-800 hover:bg-rose-200' },
+                ].map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleUpdatePrivacy({ sensitivity: s.id })}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      (record.sensitivity || 'standard') === s.id
+                        ? 'ring-2 ring-blue-600 ring-offset-1 font-bold shadow-sm ' + s.color
+                        : s.color + ' opacity-70'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400">
+                {(record.sensitivity || 'standard') === 'standard' && 'Visible to doctors during authorized consultations.'}
+                {record.sensitivity === 'sensitive' && 'Automatically hidden from doctors unless patient grants explicit permission.'}
+                {record.sensitivity === 'strictly_confidential' && 'Strictly hidden from all general doctor access (mental/sexual health).'}
+              </p>
+            </div>
+
+            {/* Masking Toggle */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-700 mb-1">Doctor Masking Switch</p>
+                <p className="text-[11px] text-slate-500 mb-3">
+                  Masking prevents this record from appearing in doctor portals under any circumstances.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleUpdatePrivacy({ isMaskedByPatient: !record.isMaskedByPatient })}
+                className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                  record.isMaskedByPatient
+                    ? 'bg-purple-100 text-purple-800 border border-purple-300 hover:bg-purple-200'
+                    : 'bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                {record.isMaskedByPatient ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                {record.isMaskedByPatient ? 'Unmask Record (Allow sharing)' : 'Mask Record from Doctors'}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

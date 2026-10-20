@@ -1,5 +1,5 @@
 const express = require('express');
-const { getRecords, getRecordById, createRecord, updateRecord, deleteRecord, fetchFromHospital } = require('../controllers/recordController');
+const { getRecords, getRecordById, createRecord, updateRecord, updateRecordPrivacy, deleteRecord, fetchFromHospital } = require('../controllers/recordController');
 const cloudinary = require('../config/cloudinary');
 const MedicalRecord = require('../models/MedicalRecord');
 const asyncHandler = require('../utils/asyncHandler');
@@ -24,6 +24,7 @@ router.get('/:id/file', asyncHandler(async (req, res) => {
   const url = cloudinary.utils.private_download_url(record.filePublicId, format, { expires_at: Math.floor(Date.now() / 1000) + 300 });
   res.json({ success: true, data: { url, expiresInSeconds: 300 } });
 }));
+router.put('/:id/privacy', updateRecordPrivacy);
 router.put('/:id', updateRecord);
 router.delete('/:id', deleteRecord);
 

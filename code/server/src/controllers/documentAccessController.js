@@ -28,10 +28,10 @@ exports.revoke = asyncHandler(async (req, res) => changePermission(req, res, fal
 
 async function changePermission(req, res, grant) {
   const patient = req.user;
-  const doctor = await assignedDoctor(patient);
-  if (!doctor) throw new ApiError(409, 'No assigned doctor is configured for this patient');
   const record = await MedicalRecord.findOne({ _id: req.params.recordId, userId: patient._id }).select('_id');
   if (!record) throw new ApiError(404, 'Record not found');
+  const doctor = await assignedDoctor(patient);
+  if (!doctor) throw new ApiError(409, 'No assigned doctor is configured for this patient');
   const now = new Date();
   let permission;
   try { permission = await Permission.findOneAndUpdate(
@@ -48,19 +48,75 @@ async function changePermission(req, res, grant) {
       { new: true, runValidators: true }
     );
   }
-  await AccessLog.create({ patientId: patient._id, doctorId: doctor._id, action: grant ? 'access_granted' : 'access_revoked', details: `${grant ? 'Granted' : 'Revoked'} access to record ${record._id}`, ipAddress: req.ip });
+  await AccessLog.create({
+    patientId: patient._id,
+    doctorId: doctor._id,
+    doctorName: `${doctor.firstName || ''} ${doctor.lastName || ''}`.trim(),
+    action: grant ? 'access_granted' : 'access_revoked',
+    recordId: record._id,
+    details: `${grant ? 'Granted' : 'Revoked'} access to record ${record._id}`,
+    ipAddress: req.ip
+  });
   res.json({ success: true, data: { recordId: record._id, status: permission.status } });
 }
 
 exports.getAuthorizedFile = asyncHandler(async (req, res) => {
   const patient = req.patient;
   const doctorId = req.user._id;
-  if (String(patient.assignedDoctorId || '') !== String(doctorId)) throw new ApiError(403, 'Only the assigned doctor may access this record');
-  const permission = await Permission.exists({ patientId: patient._id, recordId: req.params.recordId, doctorId, status: 'active' });
-  if (!permission) throw new ApiError(403, 'Document access has not been granted');
-  const record = await MedicalRecord.findOne({ _id: req.params.recordId, userId: patient._id }).select('filePublicId fileType');
+  const session = req.accessSession;
+
+  if (session && session.permissions && session.permissions.viewRecords === false) {
+    throw new ApiError(403, 'Patient restricted record viewing for this session');
+  }
+
+  const record = await MedicalRecord.findOne({ _id: req.params.recordId, userId: patient._id });
   if (!record) throw new ApiError(404, 'Record not found');
+
+  if (record.isMaskedByPatient) {
+    throw new ApiError(403, 'Record has been masked by patient');
+  }
+
+  // If session has excludeSensitive
+  if (session && session.excludeSensitive && ['sensitive', 'strictly_confidential'].includes(record.sensitivity)) {
+    throw new ApiError(403, 'Record is classified as sensitive and not accessible');
+  }
+
+  // If session is selective_records
+  if (session && session.scopeType === 'selective_records' && session.allowedRecordIds?.length > 0) {
+    const isAllowed = session.allowedRecordIds.some(id => String(id) === String(record._id));
+    if (!isAllowed) throw new ApiError(403, 'Access to this record is not granted in the active consent scope');
+  }
+
+  // If session is category
+  if (session && session.scopeType === 'category' && session.allowedCategories?.length > 0) {
+    if (!session.allowedCategories.includes(record.category)) {
+      throw new ApiError(403, 'Category of this record is not granted in the active consent scope');
+    }
+  }
+
+  // Assigned doctor permission check if configured
+  if (patient.assignedDoctorId && String(patient.assignedDoctorId) === String(doctorId)) {
+    const permCount = await Permission.countDocuments({ patientId: patient._id, doctorId });
+    if (permCount > 0) {
+      const permission = await Permission.exists({ patientId: patient._id, recordId: req.params.recordId, doctorId, status: 'active' });
+      if (!permission) throw new ApiError(403, 'Document access has not been granted');
+    }
+  }
+
   if (!record.filePublicId) throw new ApiError(404, 'No protected file is available for this record');
+
+  // Audit Log
+  await AccessLog.create({
+    patientId: patient._id,
+    doctorId,
+    doctorName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+    action: 'viewed_single_record',
+    recordId: record._id,
+    recordTitle: record.title,
+    details: `Doctor opened document: ${record.title}`,
+    ipAddress: req.ip
+  });
+
   const format = (record.fileType || '').includes('pdf') ? 'pdf' : undefined;
   const url = cloudinary.utils.private_download_url(record.filePublicId, format, { expires_at: Math.floor(Date.now() / 1000) + 300 });
   res.json({ success: true, data: { url, expiresInSeconds: 300 } });

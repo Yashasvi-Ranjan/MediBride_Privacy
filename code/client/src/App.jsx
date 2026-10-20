@@ -35,6 +35,7 @@ import FundraiserCampaign from './pages/fundraiser/FundraiserCampaign';
 
 // Doctor Portal Pages
 import FindPatient from './pages/doctor/FindPatient';
+import PatientRecords from './pages/doctor/PatientRecords';
 import AddRecord from './pages/doctor/AddRecord';
 import WritePrescription from './pages/doctor/WritePrescription';
 import MyPatients from './pages/doctor/MyPatients';
@@ -89,6 +90,7 @@ const App = () => {
         {/* Doctor Routes */}
         <Route path="/doctor/dashboard" element={<RoleRoute allow={['doctor']}><DoctorDashboard /></RoleRoute>} />
         <Route path="/doctor/find-patient" element={<RoleRoute allow={['doctor']}><FindPatient /></RoleRoute>} />
+        <Route path="/doctor/patient/:healthId/records" element={<RoleRoute allow={['doctor']}><PatientRecords /></RoleRoute>} />
         <Route path="/doctor/patient/:healthId/add-record" element={<RoleRoute allow={['doctor']}><AddRecord /></RoleRoute>} />
         <Route path="/doctor/patient/:healthId/prescribe" element={<RoleRoute allow={['doctor']}><WritePrescription /></RoleRoute>} />
         <Route path="/doctor/my-patients" element={<RoleRoute allow={['doctor']}><MyPatients /></RoleRoute>} />

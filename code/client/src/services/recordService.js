@@ -8,6 +8,7 @@ export const recordService = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   updateRecord: (id, data) => api.put(`/records/${id}`, data),
+  updateRecordPrivacy: (id, data) => api.put(`/records/${id}/privacy`, data),
   deleteRecord: (id) => api.delete(`/records/${id}`),
   fetchFromHospital: (data) => api.post('/records/fetch-from-hospital', data),
 };

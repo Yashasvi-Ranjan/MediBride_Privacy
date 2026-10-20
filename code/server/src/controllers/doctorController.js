@@ -5,6 +5,7 @@ const AccessSession = require('../models/AccessSession');
 const AccessLog = require('../models/AccessLog');
 const MedicalRecord = require('../models/MedicalRecord');
 const Prescription = require('../models/Prescription');
+const ConsentGrant = require('../models/ConsentGrant');
 const bcrypt = require('bcryptjs');
 const cloudinary = require('../config/cloudinary');
 
@@ -26,34 +27,152 @@ exports.requestAccess = asyncHandler(async (req, res) => {
   const patient = await User.findOne({ healthId: cleanId, role: 'patient' }).select('+accessPin');
   if (!patient) throw new ApiError(404, 'Patient not found');
 
-  const isMatch = await bcrypt.compare(cleanPin, patient.accessPin);
-  if (!isMatch) throw new ApiError(401, 'Invalid Access PIN');
-
-  const expiresAt = new Date();
-  expiresAt.setHours(expiresAt.getHours() + 24); // 24 hour session
-
-  const session = await AccessSession.create({
+  // Check if patient generated a temporary scoped consent PIN
+  const pendingGrant = await ConsentGrant.findOne({
     patientId: patient._id,
-    doctorId: req.user._id,
-    expiresAt
+    accessPin: cleanPin,
+    status: 'pending',
+    expiresAt: { $gt: new Date() }
   });
 
-  await AccessLog.create({
-    patientId: patient._id,
-    doctorId: req.user._id,
-    action: 'access_granted',
-    ipAddress: req.ip
-  });
+  // Revoke any previous active session between this doctor and patient
+  await AccessSession.updateMany(
+    { patientId: patient._id, doctorId: req.user._id, status: 'active' },
+    { status: 'revoked', revokedAt: new Date(), revokedReason: 'Superceded by new PIN verification' }
+  );
+
+  let session;
+  if (pendingGrant) {
+    const durationHours = pendingGrant.durationHours || 24;
+    const expiresAt = new Date(Date.now() + durationHours * 3600 * 1000);
+
+    session = await AccessSession.create({
+      patientId: patient._id,
+      doctorId: req.user._id,
+      expiresAt,
+      scopeType: pendingGrant.scopeType,
+      allowedRecordIds: pendingGrant.allowedRecordIds,
+      allowedCategories: pendingGrant.allowedCategories,
+      dateRange: pendingGrant.dateRange,
+      excludeSensitive: pendingGrant.excludeSensitive,
+      permissions: pendingGrant.permissions || {},
+      status: 'active'
+    });
+
+    pendingGrant.status = 'used';
+    await pendingGrant.save();
+
+    await AccessLog.create({
+      patientId: patient._id,
+      doctorId: req.user._id,
+      doctorName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+      action: 'access_granted',
+      details: `Scoped PIN consent verified (${pendingGrant.scopeType}, ${durationHours}h duration)`,
+      ipAddress: req.ip
+    });
+  } else {
+    // Fall back to standard patient access PIN
+    if (!patient.accessPin) throw new ApiError(401, 'Invalid Access PIN');
+    const isMatch = await bcrypt.compare(cleanPin, patient.accessPin);
+    if (!isMatch) throw new ApiError(401, 'Invalid Access PIN');
+
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24); // 24 hour session
+
+    session = await AccessSession.create({
+      patientId: patient._id,
+      doctorId: req.user._id,
+      expiresAt,
+      scopeType: 'all',
+      excludeSensitive: true,
+      status: 'active'
+    });
+
+    await AccessLog.create({
+      patientId: patient._id,
+      doctorId: req.user._id,
+      doctorName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+      action: 'access_granted',
+      details: 'Patient master PIN verified (24h session, sensitive hidden by default)',
+      ipAddress: req.ip
+    });
+  }
 
   res.status(201).json({ success: true, data: session });
 });
 
 exports.getPatientRecords = asyncHandler(async (req, res) => {
-  if (String(req.patient.assignedDoctorId || '') !== String(req.user._id)) throw new ApiError(403, 'Only the assigned doctor may view shared records');
-  const Permission = require('../models/DocumentAccessPermission');
-  const shared = await Permission.find({ patientId: req.patient._id, doctorId: req.user._id, status: 'active' }).select('recordId');
-  const records = await MedicalRecord.find({ userId: req.patient._id, _id: { $in: shared.map((p) => p.recordId) } }).sort({ recordDate: -1 }).select('-fileUrl -filePublicId');
-  res.status(200).json({ success: true, data: records });
+  const session = req.accessSession;
+  const patientId = req.patient._id;
+
+  // 1. Check base permission
+  if (session && session.permissions && session.permissions.viewRecords === false) {
+    return res.status(200).json({ 
+      success: true, 
+      data: [], 
+      meta: { message: 'Patient restricted medical record viewing for this session.' } 
+    });
+  }
+
+  // 2. Build Zero-Trust MongoDB Filter Query
+  const query = { 
+    userId: patientId,
+    isMaskedByPatient: { $ne: true }
+  };
+
+  // Exclude Sensitive if flagged
+  if (session && session.excludeSensitive) {
+    query.sensitivity = { $nin: ['sensitive', 'strictly_confidential'] };
+  }
+
+  // Apply Granular Scopes
+  if (session && session.scopeType === 'selective_records' && session.allowedRecordIds?.length > 0) {
+    query._id = { $in: session.allowedRecordIds };
+  } else if (session && session.scopeType === 'category' && session.allowedCategories?.length > 0) {
+    query.category = { $in: session.allowedCategories };
+  } else if (session && session.scopeType === 'date_range' && session.dateRange?.startDate) {
+    query.recordDate = { 
+      $gte: new Date(session.dateRange.startDate),
+      $lte: new Date(session.dateRange.endDate || Date.now())
+    };
+  } else if (!session || session.scopeType === 'all') {
+    const Permission = require('../models/DocumentAccessPermission');
+    if (req.patient.assignedDoctorId && String(req.patient.assignedDoctorId) === String(req.user._id)) {
+      const permissionCount = await Permission.countDocuments({ patientId, doctorId: req.user._id });
+      if (permissionCount > 0) {
+        const shared = await Permission.find({ patientId, doctorId: req.user._id, status: 'active' }).select('recordId');
+        query._id = { $in: shared.map((p) => p.recordId) };
+      }
+    }
+  }
+
+  const records = await MedicalRecord.find(query).sort({ recordDate: -1 });
+
+  // Count total existing records to inform doctor of filtered view
+  const totalCount = await MedicalRecord.countDocuments({ userId: patientId });
+
+  // 3. Log access audit
+  await AccessLog.create({
+    patientId,
+    doctorId: req.user._id,
+    doctorName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+    action: 'viewed_records',
+    details: `Viewed ${records.length} of ${totalCount} records under scope '${session ? session.scopeType : 'all'}'`,
+    ipAddress: req.ip
+  });
+
+  res.status(200).json({ 
+    success: true, 
+    data: records,
+    meta: {
+      scopeType: session ? session.scopeType : 'all',
+      recordsVisible: records.length,
+      totalPatientRecords: totalCount,
+      isFiltered: records.length < totalCount,
+      excludeSensitive: session ? session.excludeSensitive : false,
+      allowedCategories: session ? session.allowedCategories : []
+    }
+  });
 });
 
 exports.addRecordToPatient = asyncHandler(async (req, res) => {

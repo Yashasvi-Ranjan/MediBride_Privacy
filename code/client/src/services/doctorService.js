@@ -4,6 +4,7 @@ export const doctorService = {
   searchPatient: (healthId) => api.get('/doctors/patients/search', { params: { healthId } }),
   requestAccess: (data) => api.post('/doctors/patients/access', data),
   getPatientRecords: (healthId) => api.get(`/doctors/patients/${healthId}/records`),
+  getFile: (healthId, recordId) => api.get(`/doctors/patients/${healthId}/records/${recordId}/file`),
   addRecord: (healthId, formData) => api.post(`/doctors/patients/${healthId}/records`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),

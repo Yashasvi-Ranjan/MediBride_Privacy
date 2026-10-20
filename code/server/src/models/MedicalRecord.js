@@ -23,6 +23,26 @@ const medicalRecordSchema = new mongoose.Schema({
   fileSize:      Number,
   hospitalName:  String,
   doctorName:    String,
+  // Granular Privacy Fields
+  sensitivity: {
+    type: String,
+    enum: ['standard', 'sensitive', 'strictly_confidential'],
+    default: 'standard',
+    index: true
+  },
+  department: {
+    type: String,
+    enum: [
+      'general_medicine', 'cardiology', 'orthopedics', 'pediatrics',
+      'dermatology', 'psychiatry', 'neurology', 'gynecology', 'oncology', 'other'
+    ],
+    default: 'general_medicine',
+    index: true
+  },
+  isMaskedByPatient: {
+    type: Boolean,
+    default: false
+  },
   recordDate:    { type: Date, default: Date.now },
   tags:          [{ type: String }],
   isPrivate:     { type: Boolean, default: true },

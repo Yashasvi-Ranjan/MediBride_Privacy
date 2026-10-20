@@ -80,6 +80,35 @@ exports.updateRecord = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: record });
 });
 
+exports.updateRecordPrivacy = asyncHandler(async (req, res) => {
+  const { sensitivity, isMaskedByPatient, department } = req.body;
+  const updates = {};
+  if (sensitivity !== undefined) {
+    if (!['standard', 'sensitive', 'strictly_confidential'].includes(sensitivity)) {
+      throw new ApiError(400, 'Invalid sensitivity level');
+    }
+    updates.sensitivity = sensitivity;
+  }
+  if (isMaskedByPatient !== undefined) {
+    updates.isMaskedByPatient = Boolean(isMaskedByPatient);
+  }
+  if (department !== undefined) {
+    updates.department = department;
+  }
+
+  const record = await MedicalRecord.findOneAndUpdate(
+    { _id: req.params.id, userId: req.user._id },
+    { $set: updates },
+    { new: true, runValidators: true }
+  ).select('-fileUrl');
+
+  if (!record) {
+    throw new ApiError(404, 'Record not found');
+  }
+
+  res.status(200).json({ success: true, message: 'Record privacy updated successfully', data: record });
+});
+
 exports.deleteRecord = asyncHandler(async (req, res) => {
   const record = await MedicalRecord.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
   if (!record) {

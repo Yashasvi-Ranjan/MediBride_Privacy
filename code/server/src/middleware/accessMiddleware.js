@@ -6,7 +6,7 @@ const User = require('../models/User');
 
 exports.verifyDoctorAccess = asyncHandler(async (req, res, next) => {
   const doctorId = req.user._id;
-  const healthId = req.params.healthId;
+  const healthId = String(req.params.healthId || '').trim().toUpperCase();
 
   const patient = await User.findOne({ healthId, role: 'patient' });
   if (!patient) {
@@ -18,29 +18,45 @@ exports.verifyDoctorAccess = asyncHandler(async (req, res, next) => {
     doctorId: doctorId,
     status: 'active',
     expiresAt: { $gt: new Date() }
-  });
+  }).sort({ createdAt: -1 });
 
   if (!session) {
-    throw new ApiError(403, 'Access denied or session expired');
+    throw new ApiError(403, 'Access denied or session expired. Patient PIN or consent required.');
   }
 
-  let action = 'viewed_records';
+  // Permission checks
   if (req.method === 'POST') {
-    if (req.originalUrl.includes('prescription')) {
-      action = 'added_prescription';
-    } else {
-      action = 'added_record';
+    if (req.originalUrl.includes('prescription') && session.permissions && session.permissions.addPrescription === false) {
+      throw new ApiError(403, 'Patient restricted adding prescriptions for this session.');
     }
-  } else if (req.method === 'GET' && req.originalUrl.includes('prescription')) {
-    action = 'viewed_prescriptions';
+    if (!req.originalUrl.includes('prescription') && session.permissions && session.permissions.addRecords === false) {
+      throw new ApiError(403, 'Patient restricted adding records for this session.');
+    }
+  } else if (req.method === 'GET') {
+    if (req.originalUrl.includes('prescription') && session.permissions && session.permissions.viewPrescriptions === false) {
+      throw new ApiError(403, 'Patient restricted viewing prescriptions for this session.');
+    }
   }
 
-  await AccessLog.create({
-    patientId: patient._id,
-    doctorId: doctorId,
-    action: action,
-    ipAddress: req.ip
-  });
+  // Log prescriptions and added records here (records viewing is logged in getPatientRecords with scope details)
+  if (req.method === 'POST') {
+    const action = req.originalUrl.includes('prescription') ? 'added_prescription' : 'added_record';
+    await AccessLog.create({
+      patientId: patient._id,
+      doctorId: doctorId,
+      doctorName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+      action: action,
+      ipAddress: req.ip
+    });
+  } else if (req.method === 'GET' && req.originalUrl.includes('prescription')) {
+    await AccessLog.create({
+      patientId: patient._id,
+      doctorId: doctorId,
+      doctorName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+      action: 'viewed_prescriptions',
+      ipAddress: req.ip
+    });
+  }
 
   req.patient = patient;
   req.accessSession = session;

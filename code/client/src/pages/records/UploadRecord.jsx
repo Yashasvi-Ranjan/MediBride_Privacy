@@ -11,6 +11,8 @@ const UploadRecord = () => {
   const [formData, setFormData] = useState({
     title: '',
     category: 'lab_report',
+    department: 'general_medicine',
+    sensitivity: 'standard',
     recordDate: new Date().toISOString().split('T')[0],
     description: '',
   });
@@ -47,6 +49,8 @@ const UploadRecord = () => {
       data.append('file', file);
       data.append('title', formData.title);
       data.append('category', formData.category);
+      data.append('department', formData.department);
+      data.append('sensitivity', formData.sensitivity);
       data.append('recordDate', formData.recordDate);
       data.append('description', formData.description);
 
@@ -134,18 +138,74 @@ const UploadRecord = () => {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+              <select
+                name="category"
+                value={formData.category}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
+              <select
+                name="department"
+                value={formData.department}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="general_medicine">General Medicine</option>
+                <option value="cardiology">Cardiology</option>
+                <option value="orthopedics">Orthopedics</option>
+                <option value="pediatrics">Pediatrics</option>
+                <option value="dermatology">Dermatology</option>
+                <option value="psychiatry">Psychiatry</option>
+                <option value="neurology">Neurology</option>
+                <option value="gynecology">Gynecology</option>
+                <option value="oncology">Oncology</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
-            <select
-              name="category"
-              value={formData.category}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              {categories.map(cat => (
-                <option key={cat.id} value={cat.id}>{cat.label}</option>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Privacy & Sensitivity Level</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { id: 'standard', label: 'Standard', desc: 'Visible in regular consultations' },
+                { id: 'sensitive', label: 'Sensitive', desc: 'Hidden from doctors by default' },
+                { id: 'strictly_confidential', label: 'Confidential', desc: 'Restricted psychiatric/reproductive' },
+              ].map(opt => (
+                <label
+                  key={opt.id}
+                  className={`border rounded-xl p-3 cursor-pointer transition-colors flex flex-col justify-between ${
+                    formData.sensitivity === opt.id
+                      ? 'border-blue-600 bg-blue-50/50 ring-1 ring-blue-600'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="sensitivity"
+                      value={opt.id}
+                      checked={formData.sensitivity === opt.id}
+                      onChange={handleChange}
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="font-semibold text-xs text-gray-900">{opt.label}</span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1 pl-5">{opt.desc}</p>
+                </label>
               ))}
-            </select>
+            </div>
           </div>
 
           <div>
